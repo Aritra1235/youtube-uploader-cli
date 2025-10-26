@@ -24,6 +24,8 @@ const MAIN_MENU = 'Main Menu';
 const HELP = 'Help';
 const LOGIN = 'Login';
 const AUTHENTICATING = 'Authenticating...';
+const FILE_INPUT_METHOD = 'File Input Method';
+const ENTER_FILE_PATH = 'Enter File Path';
 
 interface AppState {
   step: string;
@@ -34,6 +36,7 @@ interface AppState {
   error?: string;
   loading: boolean;
   isAuthenticated: boolean;
+  fileInputMode?: 'browse' | 'manual';
 }
 
 const privacyOptions = [
@@ -55,6 +58,11 @@ const mainMenuOptions = [
   { label: 'Login to YouTube', value: 'login' },
   { label: 'Help', value: 'help' },
   { label: 'Exit', value: 'exit' },
+];
+
+const fileInputMethodOptions = [
+  { label: 'Browse current directory', value: 'browse' },
+  { label: 'Enter custom file path', value: 'manual' },
 ];
 
 const App: React.FC = () => {
@@ -113,13 +121,26 @@ const App: React.FC = () => {
 
   const handleMainMenuSelect = (item: any) => {
     if (item.value === 'upload') {
-      setState(s => ({ ...s, step: SELECT_FILES }));
+      setState(s => ({ ...s, step: FILE_INPUT_METHOD, filePath: undefined }));
     } else if (item.value === 'login') {
       setState(s => ({ ...s, step: LOGIN }));
     } else if (item.value === 'help') {
       setState(s => ({ ...s, step: HELP }));
     } else if (item.value === 'exit') {
       process.exit(0);
+    }
+  };
+
+  const validateAndSelectFile = (path: string) => {
+    try {
+      if (!fs.existsSync(path)) {
+        setState(s => ({ ...s, error: 'File does not exist', step: ERROR }));
+        return;
+      }
+      const resolvedPath = fs.realpathSync(path);
+      setState(s => ({ ...s, filePath: resolvedPath, step: ENTER_TITLE }));
+    } catch (err) {
+      setState(s => ({ ...s, error: (err as Error).message, step: ERROR }));
     }
   };
 
@@ -211,6 +232,43 @@ const App: React.FC = () => {
             <Text>{AUTHENTICATING}</Text>
             <Spinner type="dots" />
             <Text>Opening browser for authentication...</Text>
+          </Box>
+        );
+      case FILE_INPUT_METHOD:
+        return (
+          <Box flexDirection="column">
+            <Text bold>Choose File Input Method</Text>
+            <Text></Text>
+            <SelectInput
+              items={fileInputMethodOptions}
+              onSelect={(item) => {
+                if (item.value === 'browse') {
+                  setState(s => ({ ...s, step: SELECT_FILES }));
+                } else if (item.value === 'manual') {
+                  setState(s => ({ ...s, step: ENTER_FILE_PATH }));
+                }
+              }}
+            />
+          </Box>
+        );
+      case ENTER_FILE_PATH:
+        return (
+          <Box flexDirection="column">
+            <Text bold>Enter File Path</Text>
+            <Text dimColor>Enter the full path to your video file:</Text>
+            <Text>(Examples: /home/user/video.mp4 or ~/Videos/myfile.mov)</Text>
+            <Text></Text>
+            <TextInput
+              value={state.filePath || ''}
+              onChange={(value) => setState(s => ({ ...s, filePath: value }))}
+              onSubmit={() => {
+                if (!state.filePath || state.filePath.trim() === '') {
+                  setState(s => ({ ...s, error: 'Please enter a file path', step: ERROR }));
+                } else {
+                  validateAndSelectFile(state.filePath);
+                }
+              }}
+            />
           </Box>
         );
       case SELECT_FILES:
