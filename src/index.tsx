@@ -10,6 +10,7 @@ import { uploadVideo, type VideoMetadata } from './uploader.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as readline from 'node:readline';
+import * as os from 'node:os';
 
 const SELECT_FILES = 'Select Video File';
 const ENTER_TITLE = 'Enter Title';
@@ -26,6 +27,7 @@ const LOGIN = 'Login';
 const AUTHENTICATING = 'Authenticating...';
 const FILE_INPUT_METHOD = 'File Input Method';
 const ENTER_FILE_PATH = 'Enter File Path';
+const BROWSE_FILES = 'Browse Files';
 
 interface AppState {
   step: string;
@@ -37,6 +39,7 @@ interface AppState {
   loading: boolean;
   isAuthenticated: boolean;
   fileInputMode?: 'browse' | 'manual';
+  currentBrowseDir?: string;
 }
 
 const privacyOptions = [
@@ -61,7 +64,7 @@ const mainMenuOptions = [
 ];
 
 const fileInputMethodOptions = [
-  { label: 'Browse current directory', value: 'browse' },
+  { label: 'Browse home directory', value: 'browse' },
   { label: 'Enter custom file path', value: 'manual' },
 ];
 
@@ -137,10 +140,64 @@ const App: React.FC = () => {
         setState(s => ({ ...s, error: 'File does not exist', step: ERROR }));
         return;
       }
+      const stats = fs.statSync(path);
+      if (stats.isDirectory()) {
+        setState(s => ({ ...s, error: 'Path is a directory, not a file. Please select a video file.', step: ERROR }));
+        return;
+      }
+      const supportedFormats = /\.(mp4|mov|avi|wmv)$/i;
+      if (!supportedFormats.test(path)) {
+        setState(s => ({ ...s, error: 'Unsupported file format. Supported: MP4, MOV, AVI, WMV', step: ERROR }));
+        return;
+      }
       const resolvedPath = fs.realpathSync(path);
       setState(s => ({ ...s, filePath: resolvedPath, step: ENTER_TITLE }));
     } catch (err) {
       setState(s => ({ ...s, error: (err as Error).message, step: ERROR }));
+    }
+  };
+
+  const getBrowserItems = (dirPath: string) => {
+    try {
+      const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+      const items: any[] = [];
+
+      // Add parent directory option (if not home)
+      const homeDir = os.homedir();
+      if (dirPath !== homeDir) {
+        items.push({ label: '.. (Parent Directory)', value: 'PARENT', type: 'parent' });
+      }
+
+      // Add directories
+      entries
+        .filter(e => e.isDirectory() && !e.name.startsWith('.'))
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .forEach(e => {
+          items.push({ label: '[DIR] ' + e.name, value: path.join(dirPath, e.name), type: 'dir' });
+        });
+
+      // Add video files
+      entries
+        .filter(e => e.isFile() && /\.(mp4|mov|avi|wmv)$/i.test(e.name))
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .forEach(e => {
+          items.push({ label: '[FILE] ' + e.name, value: path.join(dirPath, e.name), type: 'file' });
+        });
+
+      return items;
+    } catch (err) {
+      return [];
+    }
+  };
+
+  const handleBrowseSelect = (item: any) => {
+    if (item.type === 'parent') {
+      const parentDir = path.dirname(state.currentBrowseDir || os.homedir());
+      setState(s => ({ ...s, currentBrowseDir: parentDir }));
+    } else if (item.type === 'dir') {
+      setState(s => ({ ...s, currentBrowseDir: item.value }));
+    } else if (item.type === 'file') {
+      validateAndSelectFile(item.value);
     }
   };
 
@@ -243,7 +300,7 @@ const App: React.FC = () => {
               items={fileInputMethodOptions}
               onSelect={(item) => {
                 if (item.value === 'browse') {
-                  setState(s => ({ ...s, step: SELECT_FILES }));
+                  setState(s => ({ ...s, step: BROWSE_FILES }));
                 } else if (item.value === 'manual') {
                   setState(s => ({ ...s, step: ENTER_FILE_PATH }));
                 }
@@ -271,19 +328,32 @@ const App: React.FC = () => {
             />
           </Box>
         );
-      case SELECT_FILES:
+      case BROWSE_FILES:
         return (
           <Box flexDirection="column">
-            <Text bold>Select Video File</Text>
-            <Text dimColor>Choose a video from current directory:</Text>
+            <Text bold>Browse Files</Text>
+            <Text dimColor>Location: {state.currentBrowseDir || os.homedir()}</Text>
+            <Text></Text>
             {(() => {
-              const files = fs.readdirSync('.')
-                .filter(f => /\.(mp4|mov|avi|wmv)$/i.test(f))
-                .map(f => ({ label: f, value: path.resolve(f) }));
-              if (files && files.length > 0) {
-                return <SelectInput items={files} onSelect={handleFileSelect} />;
+              const currentDir = state.currentBrowseDir || os.homedir();
+              const files = getBrowserItems(currentDir);
+              const backOption = { label: 'Back to Main Menu', value: 'BACK_MENU', type: 'action' };
+              const allItems = [...files, backOption];
+              if (allItems && allItems.length > 0) {
+                return (
+                  <SelectInput
+                    items={allItems}
+                    onSelect={(item) => {
+                      if (item.value === 'BACK_MENU') {
+                        setState(s => ({ ...s, step: MAIN_MENU, currentBrowseDir: undefined }));
+                      } else {
+                        handleBrowseSelect(item);
+                      }
+                    }}
+                  />
+                );
               } else {
-                return <Text color="red">No video files found in current directory.</Text>;
+                return <Text color="red">Error reading directory.</Text>;
               }
             })()}
           </Box>

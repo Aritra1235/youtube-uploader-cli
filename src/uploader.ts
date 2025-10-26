@@ -17,9 +17,23 @@ export async function uploadVideo(
   auth: OAuth2Client,
   onProgress: (progress: number) => void
 ): Promise<string> {
+  // Validate file exists and is readable
+  if (!fs.existsSync(filePath)) {
+    throw new Error('File not found: ' + filePath);
+  }
+
+  const stats = fs.statSync(filePath);
+  if (stats.isDirectory()) {
+    throw new Error('Path is a directory, not a file: ' + filePath);
+  }
+
+  if (!stats.isFile()) {
+    throw new Error('Path is not a regular file: ' + filePath);
+  }
+
   const youtube = google.youtube({ version: 'v3', auth });
 
-  const fileSize = fs.statSync(filePath).size;
+  const fileSize = stats.size;
   const requestBody = {
     snippet: {
       title: metadata.title,
