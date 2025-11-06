@@ -65,6 +65,14 @@ export async function uploadVideo(
     body: fs.createReadStream(filePath),
   };
 
+  logger.debug('API Request Details', {
+    endpoint: 'youtube.videos.insert',
+    part: ['snippet', 'status'],
+    requestBody,
+    mediaSize: fileSize,
+    mediaFormat: path.extname(filePath),
+  });
+
   return new Promise((resolve, reject) => {
     youtube.videos.insert(
       {
@@ -81,16 +89,34 @@ export async function uploadVideo(
       },
       (err: any, response: any) => {
         if (err) {
+          logger.error('YouTube API Error Response', err, {
+            filePath,
+            errorCode: err.code,
+            errorStatus: err.status,
+            errorMessage: err.message,
+            errorDetails: err.errors,
+            fullError: JSON.stringify(err, null, 2),
+          });
           logger.logUploadError(err, filePath);
           reject(err);
           return;
         }
         if (response?.data?.id) {
           const videoId = response.data.id;
+          logger.debug('YouTube API Success Response', {
+            videoId,
+            status: response.status,
+            statusText: response.statusText,
+          });
           logger.logUploadSuccess(videoId, filePath);
           resolve(videoId);
         } else {
           const error = new Error('Upload failed: No video ID returned');
+          logger.error('YouTube API Response Invalid', error, {
+            filePath,
+            responseData: response?.data,
+            fullResponse: JSON.stringify(response, null, 2),
+          });
           logger.logUploadError(error, filePath);
           reject(error);
         }
