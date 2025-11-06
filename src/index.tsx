@@ -7,6 +7,7 @@ import Spinner from 'ink-spinner';
 import { fromEvent } from 'rxjs';
 import { authorize } from './auth.js';
 import { uploadVideo, type VideoMetadata } from './uploader.js';
+import { logger } from './utils/logger.js';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as readline from 'node:readline';
@@ -78,6 +79,23 @@ const App: React.FC = () => {
   });
 
   useEffect(() => {
+    logger.logSessionStart();
+
+    const handleExit = () => {
+      logger.logSessionEnd(0);
+      process.exit(0);
+    };
+
+    process.on('exit', () => {
+      logger.logSessionEnd(0);
+    });
+
+    return () => {
+      process.removeAllListeners('exit');
+    };
+  }, []);
+
+  useEffect(() => {
     if (state.step === SELECT_FILES && !state.filePath) {
       // Auto-scan current dir for .mp4/.mov files for selection
       const files = fs.readdirSync('.')
@@ -134,26 +152,35 @@ const App: React.FC = () => {
     }
   };
 
-  const validateAndSelectFile = (path: string) => {
+  const validateAndSelectFile = (filePath: string) => {
     try {
-      if (!fs.existsSync(path)) {
-        setState(s => ({ ...s, error: 'File does not exist', step: ERROR }));
+      if (!fs.existsSync(filePath)) {
+        const errorMsg = 'File does not exist';
+        logger.warn(errorMsg, { filePath });
+        setState(s => ({ ...s, error: errorMsg, step: ERROR }));
         return;
       }
-      const stats = fs.statSync(path);
+      const stats = fs.statSync(filePath);
       if (stats.isDirectory()) {
-        setState(s => ({ ...s, error: 'Path is a directory, not a file. Please select a video file.', step: ERROR }));
+        const errorMsg = 'Path is a directory, not a file. Please select a video file.';
+        logger.warn(errorMsg, { filePath });
+        setState(s => ({ ...s, error: errorMsg, step: ERROR }));
         return;
       }
       const supportedFormats = /\.(mp4|mov|avi|wmv)$/i;
-      if (!supportedFormats.test(path)) {
-        setState(s => ({ ...s, error: 'Unsupported file format. Supported: MP4, MOV, AVI, WMV', step: ERROR }));
+      if (!supportedFormats.test(filePath)) {
+        const errorMsg = 'Unsupported file format. Supported: MP4, MOV, AVI, WMV';
+        logger.warn(errorMsg, { filePath });
+        setState(s => ({ ...s, error: errorMsg, step: ERROR }));
         return;
       }
-      const resolvedPath = fs.realpathSync(path);
+      const resolvedPath = fs.realpathSync(filePath);
+      logger.info('File selected', { filePath: resolvedPath });
       setState(s => ({ ...s, filePath: resolvedPath, step: ENTER_TITLE }));
     } catch (err) {
-      setState(s => ({ ...s, error: (err as Error).message, step: ERROR }));
+      const errorMsg = (err as Error).message;
+      logger.error('File validation error', err, { filePath });
+      setState(s => ({ ...s, error: errorMsg, step: ERROR }));
     }
   };
 
@@ -202,12 +229,16 @@ const App: React.FC = () => {
   };
 
   const handleLogin = async () => {
+    logger.info('User initiated login');
     setState(s => ({ ...s, loading: true, step: AUTHENTICATING, error: undefined }));
     try {
       await authorize();
+      logger.info('Login successful');
       setState(s => ({ ...s, isAuthenticated: true, loading: false, step: MAIN_MENU }));
     } catch (err) {
-      setState(s => ({ ...s, error: (err as Error).message, loading: false, step: ERROR }));
+      const errorMsg = (err as Error).message;
+      logger.error('Login failed', err);
+      setState(s => ({ ...s, error: errorMsg, loading: false, step: ERROR }));
     }
   };
 
@@ -217,11 +248,17 @@ const App: React.FC = () => {
 
   const handleUpload = async () => {
     if (!state.filePath || !state.metadata.title) {
-      setState(s => ({ ...s, error: 'Missing required fields' }));
+      const errorMsg = 'Missing required fields';
+      logger.warn(errorMsg, { filePath: state.filePath, hasTitle: Boolean(state.metadata.title) });
+      setState(s => ({ ...s, error: errorMsg }));
       return;
     }
     setState(s => ({ ...s, loading: true, step: UPLOADING, error: undefined }));
     try {
+      logger.info('Upload process initiated', {
+        fileName: path.basename(state.filePath),
+        title: state.metadata.title,
+      });
       const auth = await authorize();
       const videoId = await uploadVideo(
         state.filePath,
@@ -229,9 +266,12 @@ const App: React.FC = () => {
         auth,
         (progress) => setState(s => ({ ...s, progress }))
       );
+      logger.info('Upload completed successfully', { videoId });
       setState(s => ({ ...s, videoId, step: SUCCESS, loading: false }));
     } catch (err) {
-      setState(s => ({ ...s, error: (err as Error).message, loading: false, step: ERROR }));
+      const errorMsg = (err as Error).message;
+      logger.error('Upload process failed', err, { filePath: state.filePath });
+      setState(s => ({ ...s, error: errorMsg, loading: false, step: ERROR }));
     }
   };
 

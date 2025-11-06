@@ -59,3 +59,10 @@ youtube_export_*.json
 *.swp
 *.swo
 
+LOGGING_GUIDE.md
+.gitignore
+.gitignore
+POLISHING_GUIDE.md
+POLISHING_SUMMARY.md
+LOGGING_IMPLEMENTATION_SUMMARY.md
+LOGS_QUICK_REFERENCE.md

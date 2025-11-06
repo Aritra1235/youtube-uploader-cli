@@ -2,6 +2,7 @@ import { google } from 'googleapis';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { OAuth2Client } from 'google-auth-library';
+import { logger } from './utils/logger.js';
 
 export interface VideoMetadata {
   title: string;
@@ -19,17 +20,31 @@ export async function uploadVideo(
 ): Promise<string> {
   // Validate file exists and is readable
   if (!fs.existsSync(filePath)) {
-    throw new Error('File not found: ' + filePath);
+    const error = new Error('File not found: ' + filePath);
+    logger.logUploadError(error, filePath);
+    throw error;
   }
 
   const stats = fs.statSync(filePath);
   if (stats.isDirectory()) {
-    throw new Error('Path is a directory, not a file: ' + filePath);
+    const error = new Error('Path is a directory, not a file: ' + filePath);
+    logger.logUploadError(error, filePath);
+    throw error;
   }
 
   if (!stats.isFile()) {
-    throw new Error('Path is not a regular file: ' + filePath);
+    const error = new Error('Path is not a regular file: ' + filePath);
+    logger.logUploadError(error, filePath);
+    throw error;
   }
+
+  logger.logFileValidation(filePath, true);
+  logger.logMetadataValidation(metadata, true);
+  logger.logUploadStart(filePath, {
+    title: metadata.title,
+    privacy: metadata.privacy,
+    categoryId: metadata.categoryId,
+  });
 
   const youtube = google.youtube({ version: 'v3', auth });
 
@@ -60,18 +75,24 @@ export async function uploadVideo(
       {
         onUploadProgress: (evt: any) => {
           const progress = (evt.bytesRead / fileSize) * 100;
+          logger.logUploadProgress(progress, filePath);
           onProgress(progress);
         },
       },
       (err: any, response: any) => {
         if (err) {
+          logger.logUploadError(err, filePath);
           reject(err);
           return;
         }
         if (response?.data?.id) {
-          resolve(response.data.id);
+          const videoId = response.data.id;
+          logger.logUploadSuccess(videoId, filePath);
+          resolve(videoId);
         } else {
-          reject(new Error('Upload failed: No video ID returned'));
+          const error = new Error('Upload failed: No video ID returned');
+          logger.logUploadError(error, filePath);
+          reject(error);
         }
       }
     );
