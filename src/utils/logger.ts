@@ -20,7 +20,7 @@ class Logger {
   constructor() {
     this.logsDir = path.join(process.cwd(), 'logs');
     this.ensureLogsDirectory();
-    this.currentLogFile = this.getLogFilePath();
+    this.currentLogFile = this.generateLogFilePath();
   }
 
   private ensureLogsDirectory(): void {
@@ -29,7 +29,7 @@ class Logger {
     }
   }
 
-  private getLogFilePath(): string {
+  private generateLogFilePath(): string {
     const today = new Date().toISOString().split('T')[0];
     return path.join(this.logsDir, `youtube-uploader-${today}.log`);
   }
