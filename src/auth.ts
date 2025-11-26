@@ -23,6 +23,21 @@ export async function authorize(): Promise<OAuth2Client> {
       const tokens: Credentials = JSON.parse(content);
       client = new OAuth2Client();
       client.setCredentials(tokens);
+
+      // Refresh token if expired
+      if (tokens.expiry_date && tokens.expiry_date <= Date.now()) {
+        logger.info('Access token expired, refreshing...', {
+          expiryDate: new Date(tokens.expiry_date),
+        });
+        await client.refreshAccessToken();
+        // Save the refreshed credentials
+        await fs.promises.writeFile(TOKENS_PATH, JSON.stringify(client.credentials));
+        logger.info('Token refreshed and saved', {
+          tokensPath: TOKENS_PATH,
+          newExpiryDate: new Date(client.credentials?.expiry_date || 0),
+        });
+      }
+
       logger.logAuthSuccess();
     } else {
       logger.info('Initiating new authentication flow', {
