@@ -14,6 +14,8 @@ interface LogEntry {
 }
 
 const RUN_LABEL_LENGTH = 12;
+const TIME_PART_LENGTH = 10;
+const RANDOM_PART_LENGTH = 16;
 const CROCKFORD_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 
 class Logger {
@@ -61,20 +63,20 @@ class Logger {
 
   private generateUlid(): string {
     const time = Date.now();
-    const timePart = this.encodeTime(time, 10);
-    const randomPart = this.encodeRandom(16);
+    const timePart = this.encodeTime(time, TIME_PART_LENGTH);
+    const randomPart = this.encodeRandom(RANDOM_PART_LENGTH);
     return `${timePart}${randomPart}`;
   }
 
   private encodeTime(time: number, length: number): string {
     let value = BigInt(time);
-    let output = '';
-    for (let i = length; i > 0; i--) {
+    const chars: string[] = new Array(length);
+    for (let i = length - 1; i >= 0; i--) {
       const mod = Number(value % 32n);
-      output = CROCKFORD_ALPHABET[mod] + output;
-      value = value / 32n;
+      chars[i] = CROCKFORD_ALPHABET[mod];
+      value = value >> 5n; // divide by 32 with integer semantics
     }
-    return output;
+    return chars.join('');
   }
 
   private encodeRandom(length: number): string {
