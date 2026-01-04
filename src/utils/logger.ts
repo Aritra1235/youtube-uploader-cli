@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { randomBytes } from 'node:crypto';
 
 export type LogLevel = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
 
@@ -12,15 +13,25 @@ interface LogEntry {
   stack?: string;
 }
 
+const RUN_LABEL_LENGTH = 12;
+const TIME_PART_LENGTH = 10;
+const RANDOM_PART_LENGTH = 16;
+const CROCKFORD_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+
 class Logger {
   private logsDir: string;
   private currentLogFile: string;
   private logLevel: LogLevel = 'INFO';
+  private runId: string;
+  private runLabel: string;
 
   constructor() {
-    this.logsDir = path.join(process.cwd(), 'logs');
+    this.runId = this.generateRunId();
+    this.runLabel = this.runId.slice(0, RUN_LABEL_LENGTH);
+    this.logsDir = this.resolveLogsDirectory();
     this.ensureLogsDirectory();
     this.currentLogFile = this.generateLogFilePath();
+    this.writeRunHeader();
   }
 
   private ensureLogsDirectory(): void {
@@ -29,9 +40,56 @@ class Logger {
     }
   }
 
+  private resolveLogsDirectory(): string {
+    const appDir = 'youtube-uploader-cli';
+
+    if (process.platform === 'win32') {
+      const appData = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
+      return path.join(appData, appDir, 'logs');
+    }
+
+    if (process.platform === 'darwin') {
+      return path.join(os.homedir(), 'Library', 'Logs', appDir);
+    }
+
+    const xdgConfigHome = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+    return path.join(xdgConfigHome, appDir, 'logs');
+  }
+
+  private generateRunId(): string {
+    // ULID-like sortable identifier with embedded timestamp
+    return this.generateUlid();
+  }
+
+  private generateUlid(): string {
+    const time = Date.now();
+    const timePart = this.encodeTime(time, TIME_PART_LENGTH);
+    const randomPart = this.encodeRandom(RANDOM_PART_LENGTH);
+    return `${timePart}${randomPart}`;
+  }
+
+  private encodeTime(time: number, length: number): string {
+    let value = BigInt(time);
+    const chars: string[] = new Array(length);
+    for (let i = length - 1; i >= 0; i--) {
+      const mod = Number(value % 32n);
+      chars[i] = CROCKFORD_ALPHABET[mod];
+      value = value >> 5n; // divide by 32 with integer semantics
+    }
+    return chars.join('');
+  }
+
+  private encodeRandom(length: number): string {
+    const bytes = randomBytes(length);
+    let output = '';
+    for (let i = 0; i < length; i++) {
+      output += CROCKFORD_ALPHABET[bytes[i] % 32];
+    }
+    return output;
+  }
+
   private generateLogFilePath(): string {
-    const today = new Date().toISOString().split('T')[0];
-    return path.join(this.logsDir, `youtube-uploader-${today}.log`);
+    return path.join(this.logsDir, `youtube-uploader-${this.runId}.log`);
   }
 
   private formatTimestamp(date: Date = new Date()): string {
@@ -39,17 +97,18 @@ class Logger {
   }
 
   private formatLogEntry(entry: LogEntry): string {
-    const baseLog = `[${entry.timestamp}] [${entry.level}] ${entry.message}`;
+    const baseLog = `[${entry.timestamp}] [${entry.level}] [run:${this.runLabel}] ${entry.message}`;
+    const parts = [baseLog];
 
     if (entry.metadata && Object.keys(entry.metadata).length > 0) {
-      return `${baseLog} ${JSON.stringify(entry.metadata)}`;
+      parts.push(JSON.stringify(entry.metadata));
     }
 
+    const logLine = parts.join(' ');
     if (entry.stack) {
-      return `${baseLog}\n${entry.stack}`;
+      return `${logLine}\n${entry.stack}`;
     }
-
-    return baseLog;
+    return logLine;
   }
 
   private writeToFile(entry: LogEntry): void {
@@ -74,6 +133,23 @@ class Logger {
   public setLogLevel(level: LogLevel): void {
     this.logLevel = level;
     this.debug(`Log level set to ${level}`);
+  }
+
+  private writeRunHeader(): void {
+    const entry: LogEntry = {
+      timestamp: this.formatTimestamp(),
+      level: 'INFO',
+      message: 'youtube-uploader-cli run initialized',
+      metadata: {
+        runId: this.runId,
+        runLabel: this.runLabel,
+        logFile: this.currentLogFile,
+        platform: process.platform,
+        nodeVersion: process.version,
+        pid: process.pid,
+      },
+    };
+    this.writeToFile(entry);
   }
 
   public debug(message: string, metadata?: Record<string, any>): void {
@@ -283,4 +359,3 @@ class Logger {
 }
 
 export const logger = new Logger();
-
