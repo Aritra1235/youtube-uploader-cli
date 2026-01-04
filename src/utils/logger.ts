@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
-import { randomUUID } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 
 export type LogLevel = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
 
@@ -14,6 +14,7 @@ interface LogEntry {
 }
 
 const RUN_LABEL_LENGTH = 12;
+const CROCKFORD_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 
 class Logger {
   private logsDir: string;
@@ -54,9 +55,35 @@ class Logger {
   }
 
   private generateRunId(): string {
-    // Filesystem-safe UTC timestamp (e.g., 20260104T035150513Z) for lexicographical sort
-    const timestamp = new Date().toISOString().replace(/[-:.]/g, '');
-    return `${timestamp}-${randomUUID()}`;
+    // ULID-like sortable identifier with embedded timestamp
+    return this.generateUlid();
+  }
+
+  private generateUlid(): string {
+    const time = Date.now();
+    const timePart = this.encodeTime(time, 10);
+    const randomPart = this.encodeRandom(16);
+    return `${timePart}${randomPart}`;
+  }
+
+  private encodeTime(time: number, length: number): string {
+    let value = BigInt(time);
+    let output = '';
+    for (let i = length; i > 0; i--) {
+      const mod = Number(value % 32n);
+      output = CROCKFORD_ALPHABET[mod] + output;
+      value = value / 32n;
+    }
+    return output;
+  }
+
+  private encodeRandom(length: number): string {
+    const bytes = randomBytes(length);
+    let output = '';
+    for (let i = 0; i < length; i++) {
+      output += CROCKFORD_ALPHABET[bytes[i] % 32];
+    }
+    return output;
   }
 
   private generateLogFilePath(): string {
