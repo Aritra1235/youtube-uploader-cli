@@ -13,14 +13,18 @@ interface LogEntry {
   stack?: string;
 }
 
+const RUN_LABEL_LENGTH = 12;
+
 class Logger {
   private logsDir: string;
   private currentLogFile: string;
   private logLevel: LogLevel = 'INFO';
   private runId: string;
+  private runLabel: string;
 
   constructor() {
     this.runId = this.generateRunId();
+    this.runLabel = this.runId.slice(0, RUN_LABEL_LENGTH);
     this.logsDir = this.resolveLogsDirectory();
     this.ensureLogsDirectory();
     this.currentLogFile = this.generateLogFilePath();
@@ -50,7 +54,8 @@ class Logger {
   }
 
   private generateRunId(): string {
-    const timestamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+    // Filesystem-safe UTC timestamp (e.g., 20260104T035150513Z) for lexicographical sort
+    const timestamp = new Date().toISOString().replace(/[-:.]/g, '');
     return `${timestamp}-${randomUUID()}`;
   }
 
@@ -63,26 +68,23 @@ class Logger {
   }
 
   private formatLogEntry(entry: LogEntry): string {
-    const baseLog = `[${entry.timestamp}] [${entry.level}] [run:${this.runId}] ${entry.message}`;
+    const baseLog = `[${entry.timestamp}] [${entry.level}] [run:${this.runLabel}] ${entry.message}`;
     const parts = [baseLog];
 
     if (entry.metadata && Object.keys(entry.metadata).length > 0) {
       parts.push(JSON.stringify(entry.metadata));
     }
 
+    const logLine = parts.join(' ');
     if (entry.stack) {
-      parts.push(entry.stack);
+      return `${logLine}\n${entry.stack}`;
     }
-
-    return parts.join(' ');
+    return logLine;
   }
 
   private writeToFile(entry: LogEntry): void {
     try {
-      const logLine = this.formatLogEntry({
-        ...entry,
-        metadata: { ...(entry.metadata || {}), runId: this.runId },
-      }) + '\n';
+      const logLine = this.formatLogEntry(entry) + '\n';
       fs.appendFileSync(this.currentLogFile, logLine, 'utf-8');
     } catch (error) {
       console.error('Failed to write to log file:', error);
@@ -111,12 +113,11 @@ class Logger {
       message: 'youtube-uploader-cli run initialized',
       metadata: {
         runId: this.runId,
+        runLabel: this.runLabel,
         logFile: this.currentLogFile,
         platform: process.platform,
         nodeVersion: process.version,
         pid: process.pid,
-        argv: process.argv,
-        cwd: process.cwd(),
       },
     };
     this.writeToFile(entry);
