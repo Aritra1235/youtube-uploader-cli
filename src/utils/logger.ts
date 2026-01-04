@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
+import { randomUUID } from 'node:crypto';
 
 export type LogLevel = 'DEBUG' | 'INFO' | 'WARN' | 'ERROR';
 
@@ -16,11 +17,14 @@ class Logger {
   private logsDir: string;
   private currentLogFile: string;
   private logLevel: LogLevel = 'INFO';
+  private runId: string;
 
   constructor() {
-    this.logsDir = path.join(process.cwd(), 'logs');
+    this.runId = this.generateRunId();
+    this.logsDir = this.resolveLogsDirectory();
     this.ensureLogsDirectory();
     this.currentLogFile = this.generateLogFilePath();
+    this.writeRunHeader();
   }
 
   private ensureLogsDirectory(): void {
@@ -29,9 +33,29 @@ class Logger {
     }
   }
 
+  private resolveLogsDirectory(): string {
+    const appDir = 'youtube-uploader-cli';
+
+    if (process.platform === 'win32') {
+      const appData = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
+      return path.join(appData, appDir, 'logs');
+    }
+
+    if (process.platform === 'darwin') {
+      return path.join(os.homedir(), 'Library', 'Logs', appDir);
+    }
+
+    const xdgConfigHome = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+    return path.join(xdgConfigHome, appDir, 'logs');
+  }
+
+  private generateRunId(): string {
+    const timestamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+    return `${timestamp}-${randomUUID()}`;
+  }
+
   private generateLogFilePath(): string {
-    const today = new Date().toISOString().split('T')[0];
-    return path.join(this.logsDir, `youtube-uploader-${today}.log`);
+    return path.join(this.logsDir, `youtube-uploader-${this.runId}.log`);
   }
 
   private formatTimestamp(date: Date = new Date()): string {
@@ -39,22 +63,26 @@ class Logger {
   }
 
   private formatLogEntry(entry: LogEntry): string {
-    const baseLog = `[${entry.timestamp}] [${entry.level}] ${entry.message}`;
+    const baseLog = `[${entry.timestamp}] [${entry.level}] [run:${this.runId}] ${entry.message}`;
+    const parts = [baseLog];
 
     if (entry.metadata && Object.keys(entry.metadata).length > 0) {
-      return `${baseLog} ${JSON.stringify(entry.metadata)}`;
+      parts.push(JSON.stringify(entry.metadata));
     }
 
     if (entry.stack) {
-      return `${baseLog}\n${entry.stack}`;
+      parts.push(entry.stack);
     }
 
-    return baseLog;
+    return parts.join(' ');
   }
 
   private writeToFile(entry: LogEntry): void {
     try {
-      const logLine = this.formatLogEntry(entry) + '\n';
+      const logLine = this.formatLogEntry({
+        ...entry,
+        metadata: { ...(entry.metadata || {}), runId: this.runId },
+      }) + '\n';
       fs.appendFileSync(this.currentLogFile, logLine, 'utf-8');
     } catch (error) {
       console.error('Failed to write to log file:', error);
@@ -74,6 +102,24 @@ class Logger {
   public setLogLevel(level: LogLevel): void {
     this.logLevel = level;
     this.debug(`Log level set to ${level}`);
+  }
+
+  private writeRunHeader(): void {
+    const entry: LogEntry = {
+      timestamp: this.formatTimestamp(),
+      level: 'INFO',
+      message: 'youtube-uploader-cli run initialized',
+      metadata: {
+        runId: this.runId,
+        logFile: this.currentLogFile,
+        platform: process.platform,
+        nodeVersion: process.version,
+        pid: process.pid,
+        argv: process.argv,
+        cwd: process.cwd(),
+      },
+    };
+    this.writeToFile(entry);
   }
 
   public debug(message: string, metadata?: Record<string, any>): void {
@@ -283,4 +329,3 @@ class Logger {
 }
 
 export const logger = new Logger();
-
